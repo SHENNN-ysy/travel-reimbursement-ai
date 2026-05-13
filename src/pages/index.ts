@@ -1,0 +1,7 @@
+export { MainLayout } from './Layout';
+export { HomePage } from './Home';
+export { UploadPage } from './Upload';
+export { ArchivePage } from './Archive';
+export { ReportPage } from './Report';
+export { SettingsPage } from './Settings';
+export { AgentChatPage } from './Agent';

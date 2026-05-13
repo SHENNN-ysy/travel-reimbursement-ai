@@ -1,0 +1,800 @@
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  Input,
+  Button,
+  List,
+  Typography,
+  Spin,
+  Empty,
+  Popconfirm,
+  message,
+  Badge,
+  Select,
+} from 'antd';
+import {
+  SendOutlined,
+  RobotOutlined,
+  UserOutlined,
+  DeleteOutlined,
+  ReloadOutlined,
+  ThunderboltOutlined,
+  FileTextOutlined,
+  TableOutlined,
+  ExportOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import {
+  fetchAgentSessions,
+  fetchAgentSessionDetail,
+  deleteAgentSession,
+  setCurrentSessionId,
+  addUserMessage,
+  addThinkingMessage,
+  addReasoningMessage,
+  appendReasoningContent,
+  addToolCallItem,
+  updateLastToolCallResult,
+  addAssistantMessage,
+  updateAssistantMessageContent,
+  clearChatItems,
+  setChatLoading,
+  createAgentSession,
+} from '@/store/slices/agentSlice';
+import { fetchProjectDetail, fetchProjects } from '@/store/slices/projectSlice';
+import type { AgentChatItem } from '@/types';
+import dayjs from 'dayjs';
+import './AgentChatPage.css';
+
+const { Text } = Typography;
+const { TextArea } = Input;
+
+let projectsFetched = false;
+
+// 工具名称映射（中文展示）
+const TOOL_LABELS: Record<string, string> = {
+  get_project_info: '获取项目信息',
+  list_files: '列出文件',
+  upload_file: '上传文件',
+  recognize_files: '识别文件',
+  get_recognition_results: '获取识别结果',
+  create_report_item: '创建报表明细',
+  auto_fill_report: '智能填充报表',
+  export_excel: '导出 Excel',
+};
+
+// 快捷指令
+const QUICK_ACTIONS = [
+  {
+    key: 'recognize_all',
+    label: '一键识别所有文件',
+    icon: <ThunderboltOutlined />,
+    prompt: '帮我识别项目下所有待识别的文件',
+  },
+  {
+    key: 'auto_fill',
+    label: '智能填充报表',
+    icon: <TableOutlined />,
+    prompt: '根据已识别的文件，帮我自动生成报表明细',
+  },
+  {
+    key: 'export_excel',
+    label: '导出报销单',
+    icon: <ExportOutlined />,
+    prompt: '帮我导出报销单 Excel',
+  },
+];
+
+export const AgentChatPage: React.FC = () => {
+  const navigate = useNavigate();
+  const dispatch = useAppDispatch();
+
+  // From Redux get current project and Agent state
+  const { currentProject, projects, projectsLoading } = useAppSelector((state) => state.project);
+  const {
+    sessions,
+    sessionsLoading,
+    currentSessionId,
+    chatItems,
+    chatLoading,
+  } = useAppSelector((state) => state.agent);
+
+  const projectId = currentProject?.id ?? null;
+
+  // Local state
+  const [inputValue, setInputValue] = useState('');
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  // token 批量更新：累积 token，每隔 50ms 同步一次到 Redux（避免高频 dispatch）
+  const pendingTextRef = useRef<string>('');                       // 累积文本
+  const batchedTokenBuffer = useRef<string>('');
+  const flushIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hasCreatedStreamingMsg = useRef(false);                      // 当前轮次是否已创建流式消息
+
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 追踪当前是否已创建 thinking/reasoning 消息，避免竞态导致的重复窗口
+  const hasThinkingMessage = useRef<boolean>(false);
+  const hasReasoningMessage = useRef<boolean>(false);
+
+  // Load project list on mount (通过模块级标志位防止 StrictMode 和 Redux 状态变化导致重复请求)
+  useEffect(() => {
+    if (projectsFetched) return;
+    projectsFetched = true;
+    dispatch(fetchProjects({ current: 1, size: 50 }));
+  }, [dispatch]);
+
+  // Listen for session switch, load history messages
+  useEffect(() => {
+    if (!currentSessionId) return;
+    dispatch(fetchAgentSessionDetail(currentSessionId));
+  }, [currentSessionId]);
+
+  // 终止上一次请求
+  const cancelPreviousRequest = useCallback(() => {
+    if (abortController) {
+      abortController.abort();
+    }
+  }, [abortController]);
+
+  // SSE 行解析：累积 buffer，处理完整的 event+data 块
+  const sendMessage = useCallback(
+    async (content: string) => {
+      if (!content.trim()) return;
+      if (!projectId) {
+        message.warning('请先选择一个报销项目');
+        return;
+      }
+
+      cancelPreviousRequest();
+
+      // 重置流式状态，防止上次中断遗留
+      pendingTextRef.current = '';
+      hasThinkingMessage.current = false;
+      hasReasoningMessage.current = false;
+      hasCreatedStreamingMsg.current = false;
+      // 清理批量更新 interval
+      if (flushIntervalRef.current) {
+        clearInterval(flushIntervalRef.current);
+        flushIntervalRef.current = null;
+      }
+      batchedTokenBuffer.current = '';
+
+      const controller = new AbortController();
+      setAbortController(controller);
+
+      // If no session, generate a stable UUID for this new session
+      let sessionId = currentSessionId;
+      if (!sessionId) {
+        sessionId = crypto.randomUUID();
+        dispatch(setCurrentSessionId(sessionId));
+      }
+
+      dispatch(addUserMessage({ content }));
+      setInputValue('');
+      dispatch(setChatLoading(true));
+
+      // SSE 解析状态（用 ref 避免闭包问题）
+      const pendingEventType = { current: '' };
+      const pendingData = { current: '' };
+
+      try {
+        const response = await fetch(
+          `http://localhost:8080/api/v1/projects/${projectId}/agent/chat?sessionId=${encodeURIComponent(sessionId)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ message: content }),
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`请求失败 (${response.status}): ${errText}`);
+        }
+
+        if (!response.body) throw new Error('响应体为空');
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        // 累积器：保存不完整的行尾
+        let leftover = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          // 将新数据追加到累积器
+          leftover += decoder.decode(value, { stream: true });
+
+          // 按行分割
+          let lines = leftover.split(/\n/);
+          // 最后一项可能是未完成的行，保留给下次处理
+          leftover = lines.pop() ?? '';
+
+          for (const rawLine of lines) {
+            // 去掉可能的 \r
+            const line = rawLine.replace(/\r$/, '').trim();
+
+            if (!line) {
+              // 空行 → 触发一个完整事件的分发
+              if (pendingEventType.current) {
+                const raw = pendingData.current.trim();
+                if (raw) {
+                  try {
+                    handleSSEEvent(pendingEventType.current, JSON.parse(raw));
+                  } catch {
+                    handleSSEEvent(pendingEventType.current, raw);
+                  }
+                } else {
+                  handleSSEEvent(pendingEventType.current, null);
+                }
+              }
+              pendingEventType.current = '';
+              pendingData.current = '';
+              continue;
+            }
+
+            if (line.startsWith('event:')) {
+              pendingEventType.current = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+              pendingData.current = line.slice(5);
+            }
+          }
+        }
+
+        // 处理流结束时残留在 buffer 中的最后一个事件（可能无尾随空行）
+        if (pendingEventType.current) {
+          const raw = pendingData.current.trim();
+          if (raw) {
+            try {
+              handleSSEEvent(pendingEventType.current, JSON.parse(raw));
+            } catch {
+              handleSSEEvent(pendingEventType.current, raw);
+            }
+          } else {
+            handleSSEEvent(pendingEventType.current, null);
+          }
+        }
+      } catch (err: any) {
+        if (err.name === 'AbortError') return;
+        // 将累积的流式内容同步到 Redux
+        if (pendingTextRef.current) {
+          dispatch(updateAssistantMessageContent(pendingTextRef.current));
+        }
+        dispatch(addAssistantMessage({ content: `连接失败: ${err.message}` }));
+        pendingTextRef.current = '';
+        hasThinkingMessage.current = false;
+        hasReasoningMessage.current = false;
+      } finally {
+        dispatch(setChatLoading(false));
+        setAbortController(null);
+        if (projectId) {
+          dispatch(fetchAgentSessions(projectId));
+        }
+      }
+    },
+    [projectId, currentSessionId, cancelPreviousRequest]
+  );
+
+  // 处理键盘提交
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage(inputValue);
+    }
+  };
+
+  // 处理快捷指令
+  const handleQuickAction = (prompt: string) => {
+    sendMessage(prompt);
+  };
+
+  // 切换会话
+  const handleSelectSession = (sessionId: string) => {
+    cancelPreviousRequest();
+    dispatch(setCurrentSessionId(sessionId));
+    dispatch(clearChatItems());
+  };
+
+  // 删除会话
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      await dispatch(deleteAgentSession(sessionId)).unwrap();
+      if (currentSessionId === sessionId) {
+        dispatch(setCurrentSessionId(null));
+        dispatch(clearChatItems());
+      }
+      message.success('会话已删除');
+    } catch (err: any) {
+      message.error(err.message || '删除失败');
+    }
+  };
+
+  // New session
+  const handleNewSession = async () => {
+    if (!projectId) return;
+    cancelPreviousRequest();
+    try {
+      await dispatch(createAgentSession(projectId)).unwrap();
+      await dispatch(fetchAgentSessions(projectId)).unwrap();
+    } catch (err: any) {
+      message.error(err.message || '创建会话失败');
+    }
+  };
+
+  // Switch project
+  const handleSelectProject = (projectId: number) => {
+    if (!projectId) return;
+    cancelPreviousRequest();
+    dispatch(fetchProjectDetail(projectId));
+    dispatch(fetchAgentSessions(projectId));
+    dispatch(clearChatItems());
+    dispatch(setCurrentSessionId(null));
+  };
+
+  // 清空对话
+  const handleClearChat = () => {
+    cancelPreviousRequest();
+    dispatch(clearChatItems());
+    dispatch(setChatLoading(false));
+    pendingTextRef.current = '';
+  };
+
+  // 处理解析出的事件
+  const handleSSEEvent = (eventType: string, rawData: unknown) => {
+    switch (eventType) {
+      case 'reasoning':
+        if (typeof rawData === 'object' && rawData !== null && 'content' in rawData) {
+          const content = (rawData as { content: string }).content;
+          if (!content) {
+            // 空内容表示推理阶段结束，保留 reasoning 消息供用户查看
+            hasReasoningMessage.current = false;
+          } else {
+            if (hasReasoningMessage.current) {
+              dispatch(appendReasoningContent(content));
+            } else {
+              dispatch(addReasoningMessage({ content }));
+              hasReasoningMessage.current = true;
+            }
+          }
+        }
+        break;
+      case 'thinking':
+        if (typeof rawData === 'object' && rawData !== null && 'content' in rawData) {
+          if (hasThinkingMessage.current) {
+            dispatch(updateLastThinkingMessage((rawData as { content: string }).content));
+          } else {
+            dispatch(addThinkingMessage({ content: (rawData as { content: string }).content }));
+            hasThinkingMessage.current = true;
+          }
+        }
+        break;
+      case 'tool_call':
+        if (typeof rawData === 'object' && rawData !== null) {
+          const d = rawData as { tool?: string; input?: Record<string, unknown> };
+          // Keep thinking/reasoning visible; just record tool call
+          dispatch(
+            addToolCallItem({
+              tool: d.tool || '',
+              input: d.input || {},
+              isExecuting: true,
+            })
+          );
+        }
+        break;
+      case 'tool_result':
+        if (typeof rawData === 'object' && rawData !== null) {
+          const d = rawData as { success?: boolean; output?: unknown; error?: string };
+          dispatch(
+            updateLastToolCallResult({
+              success: d.success ?? false,
+              output: d.output,
+              error: d.error,
+              isExecuting: false,
+            })
+          );
+        }
+        break;
+      case 'message':
+        if (typeof rawData === 'object' && rawData !== null && 'content' in rawData) {
+          const token = (rawData as { content: string }).content;
+          if (!token) break;
+
+          pendingTextRef.current += token;
+          batchedTokenBuffer.current += token;
+
+          if (!hasCreatedStreamingMsg.current) {
+            hasCreatedStreamingMsg.current = true;
+            dispatch(addAssistantMessage({ content: token }));
+          }
+
+          // 若尚未启动批量 flush interval，则启动（50ms 刷新一次）
+          if (!flushIntervalRef.current) {
+            flushIntervalRef.current = setInterval(() => {
+              if (batchedTokenBuffer.current) {
+                dispatch(updateAssistantMessageContent(pendingTextRef.current));
+                batchedTokenBuffer.current = '';
+              }
+            }, 50);
+          }
+        }
+        break;
+      case 'done':
+        // 停止批量 flush interval
+        if (flushIntervalRef.current) {
+          clearInterval(flushIntervalRef.current);
+          flushIntervalRef.current = null;
+        }
+        // 同步最终内容到 Redux
+        if (pendingTextRef.current) {
+          dispatch(updateAssistantMessageContent(pendingTextRef.current));
+        }
+        // 清理状态
+    pendingTextRef.current = '';
+    batchedTokenBuffer.current = '';
+    hasThinkingMessage.current = false;
+    hasReasoningMessage.current = false;
+    break;
+      default:
+        break;
+    }
+  };
+
+  // 渲染聊天项
+  const renderChatItem = (item: AgentChatItem) => {
+    if (item.role === 'user') {
+      return (
+        <div key={item.id} className="chat-item chat-item-user">
+          <div className="chat-avatar chat-avatar-user">
+            <UserOutlined />
+          </div>
+          <div className="chat-bubble chat-bubble-user">
+            <p>{item.content}</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (item.toolCall) {
+      const isExecuting = !item.toolResult;
+      return (
+        <div key={item.id} className="chat-item chat-item-assistant">
+          <div className="chat-avatar chat-avatar-assistant">
+            <RobotOutlined />
+          </div>
+          <div className="chat-content-wrapper">
+            <div className="chat-tool-call">
+              <div className="tool-call-header">
+                <span className="tool-call-icon">⚙️</span>
+                <span className="tool-call-label">
+                  {isExecuting
+                    ? `工具调用中：${TOOL_LABELS[item.toolCall.tool] || item.toolCall.tool}`
+                    : `${TOOL_LABELS[item.toolCall.tool] || item.toolCall.tool}`}
+                </span>
+              </div>
+              {isExecuting && (
+                <div className="tool-call-executing">
+                  <Spin size="small" />
+                  <span>执行中...</span>
+                </div>
+              )}
+            </div>
+            {item.toolResult && (
+              <div
+                className={`chat-tool-result ${
+                  item.toolResult.success ? 'tool-result-success' : 'tool-result-error'
+                }`}
+              >
+                {item.toolResult.success ? '执行成功' : '执行失败'}
+                {item.toolResult.output !== undefined && (
+                  <pre className="tool-result-output">
+                    {typeof item.toolResult.output === 'string'
+                      ? item.toolResult.output
+                      : JSON.stringify(item.toolResult.output, null, 2)}
+                  </pre>
+                )}
+                {item.toolResult.error && (
+                  <span className="tool-result-error-msg">{item.toolResult.error}</span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (item.isReasoning) {
+      return (
+        <div key={item.id} className="chat-item chat-item-assistant">
+          <div className="chat-avatar chat-avatar-assistant">
+            <RobotOutlined />
+          </div>
+          <div className="chat-bubble chat-bubble-reasoning">
+            <span className="reasoning-label">🤔 思考中...</span>
+            <pre className="reasoning-text">{item.content}</pre>
+          </div>
+        </div>
+      );
+    }
+
+    if (item.isThinking) {
+      return (
+        <div key={item.id} className="chat-item chat-item-assistant">
+          <div className="chat-avatar chat-avatar-assistant">
+            <RobotOutlined />
+          </div>
+          <div className="chat-bubble chat-bubble-thinking">
+            <Spin size="small" />
+            <span className="thinking-text">{item.content}</span>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div key={item.id} className="chat-item chat-item-assistant">
+        <div className="chat-avatar chat-avatar-assistant">
+          <RobotOutlined />
+        </div>
+        <div className="chat-bubble chat-bubble-assistant">
+          <span className="message-text">{item.content}</span>
+        </div>
+      </div>
+    );
+  };
+
+  const invoiceCount = currentProject?.confirmedCount ?? 0;
+  const unconfirmedCount = currentProject?.unconfirmedCount ?? 0;
+
+  return (
+    <div className="agent-chat-page">
+      {/* 左侧边栏 */}
+      <aside className="agent-sidebar">
+        <div className="sidebar-header">
+          <Text strong className="sidebar-title">会话列表</Text>
+          <Button
+            type="text"
+            icon={<PlusOutlined />}
+            size="small"
+            onClick={handleNewSession}
+            title="新建会话"
+          />
+        </div>
+
+        <div className="sidebar-sessions">
+          <Spin spinning={sessionsLoading}>
+            <List
+              size="small"
+              dataSource={sessions}
+              locale={{ emptyText: '暂无会话记录' }}
+              renderItem={(session) => (
+                <List.Item
+                  className={`session-item ${
+                    session.sessionId === currentSessionId ? 'session-item-active' : ''
+                  }`}
+                  onClick={() => handleSelectSession(session.sessionId)}
+                  actions={[
+                    <Popconfirm
+                      key="delete"
+                      title="确定删除此会话？"
+                      onConfirm={(e) => {
+                        e?.stopPropagation();
+                        handleDeleteSession(session.sessionId);
+                      }}
+                      okText="删除"
+                      cancelText="取消"
+                      okButtonProps={{ danger: true }}
+                    >
+                      <DeleteOutlined
+                        className="session-delete-btn"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </Popconfirm>,
+                  ]}
+                >
+                  <List.Item.Meta
+                    title={
+                      <span className="session-title">
+                        {session.lastMessage || '新会话'}
+                        {session.status === 0 && (
+                          <Badge status="processing" className="session-badge" />
+                        )}
+                      </span>
+                    }
+                    description={
+                      <span className="session-time">
+                        {dayjs(session.updatedAt).format('MM-DD HH:mm')}
+                      </span>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+          </Spin>
+        </div>
+
+        {/* Project selector */}
+        <div className="sidebar-bottom">
+          <div className="sidebar-project-selector">
+            <Text strong className="sidebar-title">选择项目</Text>
+            <Select
+              placeholder="请选择报销项目"
+              value={currentProject?.id}
+              onChange={handleSelectProject}
+              loading={projectsLoading}
+              className="project-select"
+              allowClear
+              onClear={() => {
+                dispatch({ type: 'project/clearCurrentProject' });
+                dispatch(clearChatItems());
+                dispatch(setCurrentSessionId(null));
+              }}
+              options={projects.map(p => ({
+                value: p.id,
+                label: p.name,
+              }))}
+              style={{ width: '100%' }}
+            />
+          </div>
+
+          {/* Project info card */}
+          {currentProject ? (
+            <div className="sidebar-project-card">
+              <div className="project-card-title">📋 项目信息</div>
+              <div className="project-card-content">
+                <div className="project-info-row">
+                  <span className="project-info-label">项目:</span>
+                  <span className="project-info-value">{currentProject.name}</span>
+                </div>
+                <div className="project-info-row">
+                  <span className="project-info-label">人员:</span>
+                  <span className="project-info-value">{currentProject.person || '-'}</span>
+                </div>
+                <div className="project-info-row">
+                  <span className="project-info-label">日期:</span>
+                  <span className="project-info-value">
+                    {currentProject.startDate && currentProject.endDate
+                      ? `${dayjs(currentProject.startDate).format('MM/DD')} - ${dayjs(currentProject.endDate).format('MM/DD')}`
+                      : '-'}
+                  </span>
+                </div>
+                <div className="project-info-row">
+                  <span className="project-info-label">预算:</span>
+                  <span className="project-info-value">{currentProject.budget || '-'}</span>
+                </div>
+                <div className="project-info-row">
+                  <span className="project-info-label">发票:</span>
+                  <span className="project-info-value">
+                    {invoiceCount} 份已确认 / {unconfirmedCount} 份待识别
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="sidebar-project-card">
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请从上方选择报销项目" />
+            </div>
+          )}
+
+          {/* 快捷指令 */}
+          <div className="sidebar-quick-actions">
+            <div className="quick-actions-title">💡 快捷指令</div>
+            {QUICK_ACTIONS.map((action) => (
+              <Button
+                key={action.key}
+                type="text"
+                icon={action.icon}
+                className="quick-action-btn"
+                onClick={() => handleQuickAction(action.prompt)}
+                disabled={!projectId}
+                block
+              >
+                {action.label}
+              </Button>
+            ))}
+          </div>
+
+          {/* 返回按钮 */}
+          <div className="sidebar-footer">
+            <Button
+              type="text"
+              icon={<FileTextOutlined />}
+              className="back-btn"
+              onClick={() => navigate('/archive')}
+            >
+              返回项目
+            </Button>
+          </div>
+        </div>
+      </aside>
+
+      {/* 主对话区 */}
+      <main className="agent-chat-main">
+        <div className="chat-header">
+          <div className="chat-header-left">
+            <RobotOutlined className="chat-header-icon" />
+            <span className="chat-header-title">AI 报销助手</span>
+          </div>
+          <div className="chat-header-right">
+            <Button
+              type="text"
+              icon={<ReloadOutlined />}
+              size="small"
+              onClick={handleClearChat}
+              disabled={chatItems.length === 0}
+            >
+              清空对话
+            </Button>
+          </div>
+        </div>
+
+        <div className="chat-messages">
+          {chatItems.length === 0 ? (
+            <div className="chat-empty">
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  <span>
+                    您好！我是您的 AI 报销助手。<br />
+                    请上传您的发票或截图，我会帮您自动识别、整理，生成报销单。
+                  </span>
+                }
+              />
+              <div className="chat-empty-tips">
+                <Text type="secondary" className="tips-title">您可以尝试：</Text>
+                {QUICK_ACTIONS.map((action) => (
+                  <Button
+                    key={action.key}
+                    type="link"
+                    icon={action.icon}
+                    onClick={() => handleQuickAction(action.prompt)}
+                    disabled={!projectId}
+                    className="tip-btn"
+                  >
+                    {action.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="chat-list-container">
+              <div className="chat-list">
+                {chatItems.map(renderChatItem)}
+              </div>
+            </div>
+          )}
+          {chatLoading && (
+            <div className="chat-loading-indicator">
+              <Spin size="small" />
+              <Text type="secondary" className="loading-text">AI 正在处理中...</Text>
+            </div>
+          )}
+        </div>
+
+        <div className="chat-input-area">
+          <TextArea
+            ref={textareaRef}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={projectId ? '请输入消息，Enter 发送，Shift+Enter 换行...' : '请先选择一个报销项目'}
+            autoSize={{ minRows: 1, maxRows: 4 }}
+            className="chat-input"
+            disabled={chatLoading || !projectId}
+          />
+          <Button
+            type="primary"
+            icon={<SendOutlined />}
+            onClick={() => sendMessage(inputValue)}
+            disabled={!inputValue.trim() || chatLoading || !projectId}
+            className="chat-send-btn"
+          >
+            发送
+          </Button>
+        </div>
+      </main>
+    </div>
+  );
+};

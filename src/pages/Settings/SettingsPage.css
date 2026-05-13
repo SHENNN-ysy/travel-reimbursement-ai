@@ -1,0 +1,34 @@
+.settings-page {
+  padding: 0;
+}
+
+.settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-card {
+  border-radius: 12px;
+}
+
+.settings-card .ant-card-head-title {
+  font-weight: 600;
+}
+
+.switch-hint {
+  margin-left: 12px;
+  color: #9CA3AF;
+  font-size: 13px;
+}
+
+.about-info p {
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #4B5563;
+}
+
+.about-description {
+  color: #6B7280;
+  line-height: 1.8;
+}
