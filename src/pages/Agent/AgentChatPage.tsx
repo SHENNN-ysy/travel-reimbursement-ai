@@ -463,6 +463,11 @@ export const AgentChatPage: React.FC = () => {
               isExecuting: false,
             })
           );
+          // 工具执行完成后，清空回复和推理的状态标记
+          // 这样下一轮 reasoning/message 到来时会创建全新的气泡
+          currentStreamingMsgId.current = null;
+          hasReasoningMessage.current = false;
+          currentReasoningMsgId.current = null;
         }
         break;
       case 'message':

@@ -139,11 +139,16 @@ const agentSlice = createSlice({
       });
     },
 
-    /** 更新最后一条 reasoning 消息的内容（追加） */
+    /** 更新最后一条 reasoning 消息的内容（追加）
+     *  修复：从后往前找最近的一个 reasoning 条目，排除 toolCall
+     */
     appendReasoningContent: (state, action: PayloadAction<string>) => {
-      const last = state.chatItems[state.chatItems.length - 1];
-      if (last && last.isReasoning) {
-        last.content += action.payload;
+      for (let i = state.chatItems.length - 1; i >= 0; i--) {
+        const item = state.chatItems[i];
+        if (item.isReasoning && !item.toolCall) {
+          item.content += action.payload;
+          break;
+        }
       }
     },
 
@@ -211,19 +216,30 @@ const agentSlice = createSlice({
       });
     },
 
-    /** 更新最后一条 assistant 消息的内容（传入完整累积内容，不是增量） */
+    /** 更新最后一条纯 assistant 消息的内容（传入完整累积内容，不是增量）
+     *  修复：从后往前找最近的一个纯 assistant 消息，排除 toolCall、reasoning、thinking
+     */
     updateAssistantMessageContent: (state, action: PayloadAction<string>) => {
-      const last = state.chatItems[state.chatItems.length - 1];
-      if (last && last.role === 'assistant' && !last.toolCall && !last.isThinking) {
-        last.content = action.payload;
+      for (let i = state.chatItems.length - 1; i >= 0; i--) {
+        const last = state.chatItems[i];
+        if (last.role === 'assistant' && !last.toolCall && !last.isReasoning && !last.isThinking) {
+          last.content = action.payload;
+          break;
+        }
       }
     },
 
-    /** 追加内容到最后一条 assistant 消息（流式场景增量追加） */
+    /** 追加内容到最后一条纯 assistant 消息（流式场景增量追加）
+     *  修复：在工具调用完成后，last item 是 toolCall，需找到最后一个非 toolCall/reasoning/thinking 的 assistant 条目
+     */
     appendAssistantContent: (state, action: PayloadAction<string>) => {
-      const last = state.chatItems[state.chatItems.length - 1];
-      if (last && last.role === 'assistant' && !last.toolCall && !last.isThinking) {
-        last.content += action.payload;
+      // 从后往前找最近的一个纯 assistant 消息（排除 toolCall、reasoning、thinking）
+      for (let i = state.chatItems.length - 1; i >= 0; i--) {
+        const item = state.chatItems[i];
+        if (item.role === 'assistant' && !item.toolCall && !item.isReasoning && !item.isThinking) {
+          item.content += action.payload;
+          break;
+        }
       }
     },
 
