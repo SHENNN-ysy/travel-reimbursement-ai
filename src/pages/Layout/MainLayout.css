@@ -106,6 +106,7 @@
   height: calc(100vh - 64px);
   margin-left: 240px;
   flex: 1;
+  max-width: 75%;
   overflow: hidden;
   display: flex;
   flex-direction: column;

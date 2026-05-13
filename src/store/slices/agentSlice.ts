@@ -129,9 +129,9 @@ const agentSlice = createSlice({
     // Don't remove reasoning/thinking on thinking end — keep them visible
 
     /** 添加模型推理中状态 */
-    addReasoningMessage: (state, action: PayloadAction<{ content: string }>) => {
+    addReasoningMessage: (state, action: PayloadAction<{ content: string; id?: string }>) => {
       state.chatItems.push({
-        id: `reasoning-${Date.now()}`,
+        id: action.payload.id ?? `reasoning-${Date.now()}`,
         role: 'assistant',
         content: action.payload.content,
         isReasoning: true,
@@ -219,6 +219,14 @@ const agentSlice = createSlice({
       }
     },
 
+    /** 追加内容到最后一条 assistant 消息（流式场景增量追加） */
+    appendAssistantContent: (state, action: PayloadAction<string>) => {
+      const last = state.chatItems[state.chatItems.length - 1];
+      if (last && last.role === 'assistant' && !last.toolCall && !last.isThinking) {
+        last.content += action.payload;
+      }
+    },
+
     setChatLoading: (state, action: PayloadAction<boolean>) => {
       state.chatLoading = action.payload;
     },
@@ -301,6 +309,7 @@ export const {
   updateLastToolCallResult,
   addAssistantMessage,
   updateAssistantMessageContent,
+  appendAssistantContent,
   setChatLoading,
   resetAgentState,
 } = agentSlice.actions;

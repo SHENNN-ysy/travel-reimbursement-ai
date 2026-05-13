@@ -1,5 +1,8 @@
 .archive-page {
   padding: 0;
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
 /* 报销项目选择器 — 与报销报表模块风格一致 */

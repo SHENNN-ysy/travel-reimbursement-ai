@@ -1,5 +1,8 @@
 .home-page {
   padding: 0;
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
 .welcome-section {

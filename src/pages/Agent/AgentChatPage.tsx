@@ -38,6 +38,7 @@ import {
   updateLastToolCallResult,
   addAssistantMessage,
   updateAssistantMessageContent,
+  appendAssistantContent,
   clearChatItems,
   setChatLoading,
   createAgentSession,
@@ -105,13 +106,22 @@ export const AgentChatPage: React.FC = () => {
   // Local state
   const [inputValue, setInputValue] = useState('');
   const [abortController, setAbortController] = useState<AbortController | null>(null);
-  // token 批量更新：累积 token，每隔 50ms 同步一次到 Redux（避免高频 dispatch）
-  const pendingTextRef = useRef<string>('');                       // 累积文本
-  const batchedTokenBuffer = useRef<string>('');
-  const flushIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const hasCreatedStreamingMsg = useRef(false);                      // 当前轮次是否已创建流式消息
+  // 打字机效果：用于触发组件重渲染（interval 更新 ref 后需要通知 React 重新渲染气泡）
+  const [typingRenderTick, setTypingRenderTick] = useState(0);
+  // 聊天列表容器 ref，用于打字时自动滚动到底部
+  const chatListContainerRef = useRef<HTMLDivElement>(null);
+
+  // ==================== 打字机效果相关状态 ====================
+  // 每个流式消息的打字状态：message id -> { fullText, displayedLength, intervalId }
+  const typingStateMap = useRef<
+    Map<string, { fullText: string; displayedLength: number; intervalId: ReturnType<typeof setInterval> | null }>
+  >(new Map());
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 追踪当前流式消息 ID
+  const currentStreamingMsgId = useRef<string | null>(null);
+  // 追踪当前 reasoning 消息 ID（用于 reasoning 打字机效果）
+  const currentReasoningMsgId = useRef<string | null>(null);
   // 追踪当前是否已创建 thinking/reasoning 消息，避免竞态导致的重复窗口
   const hasThinkingMessage = useRef<boolean>(false);
   const hasReasoningMessage = useRef<boolean>(false);
@@ -128,6 +138,49 @@ export const AgentChatPage: React.FC = () => {
     if (!currentSessionId) return;
     dispatch(fetchAgentSessionDetail(currentSessionId));
   }, [currentSessionId]);
+
+  // 打字动画触发时自动滚动到底部
+  useEffect(() => {
+    if (typingRenderTick === 0) return;
+    const container = chatListContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [typingRenderTick]);
+
+  // chatItems 更新时（用户发送消息、收到 AI 回复）自动滚动到底部
+  useEffect(() => {
+    if (chatItems.length === 0) return;
+    const container = chatListContainerRef.current;
+    if (container) {
+      // 延迟一小帧确保 DOM 已渲染
+      requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight;
+      });
+    }
+  }, [chatItems.length]);
+  // ==================== 打字机效果工具函数 ====================
+  const startTypingInterval = useCallback((
+    msgId: string,
+    getState: () => ReturnType<typeof typingStateMap.current.get>,
+    setTick: (fn: (t: number) => number) => void,
+    charSpeed: number = 1,
+    intervalMs: number = 16
+  ) => {
+    const intervalId = setInterval(() => {
+      const state = getState();
+      if (!state) return;
+      const newLen = Math.min(state.displayedLength + charSpeed, state.fullText.length);
+      state.displayedLength = newLen;
+      setTick((t) => t + 1);
+      if (newLen >= state.fullText.length) {
+        clearInterval(intervalId);
+        state.intervalId = null;
+      }
+    }, intervalMs);
+    const state = getState();
+    if (state) state.intervalId = intervalId;
+  }, []);
 
   // 终止上一次请求
   const cancelPreviousRequest = useCallback(() => {
@@ -148,16 +201,11 @@ export const AgentChatPage: React.FC = () => {
       cancelPreviousRequest();
 
       // 重置流式状态，防止上次中断遗留
-      pendingTextRef.current = '';
+      typingStateMap.current.clear();
+      currentStreamingMsgId.current = null;
+      currentReasoningMsgId.current = null;
       hasThinkingMessage.current = false;
       hasReasoningMessage.current = false;
-      hasCreatedStreamingMsg.current = false;
-      // 清理批量更新 interval
-      if (flushIntervalRef.current) {
-        clearInterval(flushIntervalRef.current);
-        flushIntervalRef.current = null;
-      }
-      batchedTokenBuffer.current = '';
 
       const controller = new AbortController();
       setAbortController(controller);
@@ -259,12 +307,11 @@ export const AgentChatPage: React.FC = () => {
         }
       } catch (err: any) {
         if (err.name === 'AbortError') return;
-        // 将累积的流式内容同步到 Redux
-        if (pendingTextRef.current) {
-          dispatch(updateAssistantMessageContent(pendingTextRef.current));
-        }
+        // 流式内容已实时追加到 Redux，直接添加错误消息
+        typingStateMap.current.clear();
         dispatch(addAssistantMessage({ content: `连接失败: ${err.message}` }));
-        pendingTextRef.current = '';
+        currentStreamingMsgId.current = null;
+        currentReasoningMsgId.current = null;
         hasThinkingMessage.current = false;
         hasReasoningMessage.current = false;
       } finally {
@@ -339,7 +386,6 @@ export const AgentChatPage: React.FC = () => {
     cancelPreviousRequest();
     dispatch(clearChatItems());
     dispatch(setChatLoading(false));
-    pendingTextRef.current = '';
   };
 
   // 处理解析出的事件
@@ -349,13 +395,35 @@ export const AgentChatPage: React.FC = () => {
         if (typeof rawData === 'object' && rawData !== null && 'content' in rawData) {
           const content = (rawData as { content: string }).content;
           if (!content) {
-            // 空内容表示推理阶段结束，保留 reasoning 消息供用户查看
             hasReasoningMessage.current = false;
           } else {
             if (hasReasoningMessage.current) {
-              dispatch(appendReasoningContent(content));
+              // 追加 reasoning 内容：同步到 Redux + 推进打字机动画
+              const msgId = currentReasoningMsgId.current!;
+              const state = typingStateMap.current.get(msgId);
+              const newToken = content;
+              if (state) {
+                state.fullText += newToken;
+                if (state.intervalId === null && state.displayedLength >= state.fullText.length - newToken.length) {
+                  startTypingInterval(msgId, () => typingStateMap.current.get(msgId), setTypingRenderTick, 1, 20);
+                }
+                dispatch(appendReasoningContent(newToken));
+              } else {
+                dispatch(appendReasoningContent(newToken));
+              }
+              setTypingRenderTick((t) => t + 1);
             } else {
-              dispatch(addReasoningMessage({ content }));
+              // 首次收到 reasoning：创建消息并注册打字状态
+              const msgId = `reasoning-${Date.now()}`;
+              currentReasoningMsgId.current = msgId;
+              dispatch(addReasoningMessage({ id: msgId, content }));
+              typingStateMap.current.set(msgId, {
+                fullText: content,
+                displayedLength: 0,
+                intervalId: null,
+              });
+              startTypingInterval(msgId, () => typingStateMap.current.get(msgId), setTypingRenderTick, 1, 20);
+              setTypingRenderTick((t) => t + 1);
               hasReasoningMessage.current = true;
             }
           }
@@ -402,41 +470,59 @@ export const AgentChatPage: React.FC = () => {
           const token = (rawData as { content: string }).content;
           if (!token) break;
 
-          pendingTextRef.current += token;
-          batchedTokenBuffer.current += token;
+          // 首次收到 token：创建 assistant 消息并注册打字状态
+          if (!currentStreamingMsgId.current) {
+            const msgId = `assistant-${Date.now()}`;
+            currentStreamingMsgId.current = msgId;
+            dispatch(addAssistantMessage({ id: msgId, content: token }));
 
-          if (!hasCreatedStreamingMsg.current) {
-            hasCreatedStreamingMsg.current = true;
-            dispatch(addAssistantMessage({ content: token }));
-          }
+            typingStateMap.current.set(msgId, {
+              fullText: token,
+              displayedLength: 0,
+              intervalId: null,
+            });
 
-          // 若尚未启动批量 flush interval，则启动（50ms 刷新一次）
-          if (!flushIntervalRef.current) {
-            flushIntervalRef.current = setInterval(() => {
-              if (batchedTokenBuffer.current) {
-                dispatch(updateAssistantMessageContent(pendingTextRef.current));
-                batchedTokenBuffer.current = '';
+            // 启动打字机动画（每 16ms 展示 1 个字符，≈ 60fps 逐字打字）
+            startTypingInterval(msgId, () => typingStateMap.current.get(msgId), setTypingRenderTick, 1, 16);
+
+            // 触发 React 重渲染（首次显示内容）
+            setTypingRenderTick((t) => t + 1);
+          } else {
+            // 追加 token：推进打字机动画 + 同步到 Redux（保底）
+            const msgId = currentStreamingMsgId.current;
+            const state = typingStateMap.current.get(msgId);
+            const newToken = token;
+
+            if (state) {
+              state.fullText += newToken;
+
+              // interval 触底时重新启动，从断点继续逐字动画
+              if (state.intervalId === null && state.displayedLength >= state.fullText.length - newToken.length) {
+                startTypingInterval(msgId, () => typingStateMap.current.get(msgId), setTypingRenderTick, 1, 16);
               }
-            }, 50);
+
+              dispatch(appendAssistantContent(newToken));
+            } else {
+              dispatch(appendAssistantContent(newToken));
+            }
+            setTypingRenderTick((t) => t + 1);
           }
         }
         break;
       case 'done':
-        // 停止批量 flush interval
-        if (flushIntervalRef.current) {
-          clearInterval(flushIntervalRef.current);
-          flushIntervalRef.current = null;
-        }
-        // 同步最终内容到 Redux
-        if (pendingTextRef.current) {
-          dispatch(updateAssistantMessageContent(pendingTextRef.current));
-        }
-        // 清理状态
-    pendingTextRef.current = '';
-    batchedTokenBuffer.current = '';
-    hasThinkingMessage.current = false;
-    hasReasoningMessage.current = false;
-    break;
+        // 停止所有打字动画，并将最终完整内容写入 Redux
+        typingStateMap.current.forEach((state) => {
+          if (state.intervalId) clearInterval(state.intervalId);
+          if (state.fullText) {
+            dispatch(updateAssistantMessageContent(state.fullText));
+          }
+        });
+        typingStateMap.current.clear();
+        currentStreamingMsgId.current = null;
+        currentReasoningMsgId.current = null;
+        hasThinkingMessage.current = false;
+        hasReasoningMessage.current = false;
+        break;
       default:
         break;
     }
@@ -506,6 +592,9 @@ export const AgentChatPage: React.FC = () => {
     }
 
     if (item.isReasoning) {
+      const reasoningDisplayed = typingStateMap.current.has(item.id)
+        ? item.content.slice(0, typingStateMap.current.get(item.id)!.displayedLength)
+        : item.content;
       return (
         <div key={item.id} className="chat-item chat-item-assistant">
           <div className="chat-avatar chat-avatar-assistant">
@@ -513,7 +602,7 @@ export const AgentChatPage: React.FC = () => {
           </div>
           <div className="chat-bubble chat-bubble-reasoning">
             <span className="reasoning-label">🤔 思考中...</span>
-            <pre className="reasoning-text">{item.content}</pre>
+            <pre className="reasoning-text">{reasoningDisplayed}</pre>
           </div>
         </div>
       );
@@ -533,13 +622,17 @@ export const AgentChatPage: React.FC = () => {
       );
     }
 
+    // 普通 assistant 回复（流式内容已实时追加到 Redux，使用打字机效果显示）
+    const displayedContent = typingStateMap.current.has(item.id)
+      ? item.content.slice(0, typingStateMap.current.get(item.id)!.displayedLength)
+      : item.content;
     return (
       <div key={item.id} className="chat-item chat-item-assistant">
         <div className="chat-avatar chat-avatar-assistant">
           <RobotOutlined />
         </div>
         <div className="chat-bubble chat-bubble-assistant">
-          <span className="message-text">{item.content}</span>
+          <span className="message-text">{displayedContent}</span>
         </div>
       </div>
     );
@@ -759,7 +852,7 @@ export const AgentChatPage: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="chat-list-container">
+            <div className="chat-list-container" ref={chatListContainerRef}>
               <div className="chat-list">
                 {chatItems.map(renderChatItem)}
               </div>
