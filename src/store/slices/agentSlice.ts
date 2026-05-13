@@ -157,23 +157,17 @@ const agentSlice = createSlice({
       state.chatItems = state.chatItems.filter((item) => !item.isReasoning);
     },
 
-    /** 添加工具调用记录（若已存在同工具调用则更新 input，不重复创建） */
+    /** 添加工具调用记录（每个 tool_call 事件都创建独立气泡） */
     addToolCallItem: (
       state,
-      action: PayloadAction<{ tool: string; input: Record<string, unknown>; isExecuting?: boolean }>
+      action: PayloadAction<{ toolIndex: number; tool: string; input: Record<string, unknown>; isExecuting?: boolean }>
     ) => {
-      const last = state.chatItems[state.chatItems.length - 1];
-      if (last && last.toolCall && last.toolCall.tool === action.payload.tool) {
-        // 同工具的多次调用事件（参数逐步到达），只更新 input，保留原 id
-        last.toolCall.input = action.payload.input;
-        last.toolResult = undefined;
-        return;
-      }
       state.chatItems.push({
-        id: `tool-call-${Date.now()}`,
+        id: `tool-call-${Date.now()}-${action.payload.toolIndex}`,
         role: 'assistant',
         content: `调用工具 ${action.payload.tool}`,
         toolCall: {
+          toolIndex: action.payload.toolIndex,
           tool: action.payload.tool,
           input: action.payload.input,
         },
@@ -184,21 +178,37 @@ const agentSlice = createSlice({
       });
     },
 
-    /** 更新最后一条工具调用记录的结果（显示在气泡中） */
-    updateLastToolCallResult: (
+    /** 更新指定 toolIndex 的工具调用记录的结果 */
+    updateToolCallResultByIndex: (
       state,
-      action: PayloadAction<{ success: boolean; output?: unknown; error?: string; isExecuting?: boolean }>
+      action: PayloadAction<{ toolIndex: number; success: boolean; output?: unknown; error?: string }>
     ) => {
-      const last = state.chatItems[state.chatItems.length - 1];
-      if (last && last.toolCall) {
-        if (action.payload.isExecuting === false) {
-          // 执行完成，隐藏"执行中"，显示结果
-          last.toolResult = {
-            success: action.payload.success,
-            output: action.payload.output,
-            error: action.payload.error,
-          };
-        }
+      const item = state.chatItems.find(
+        (it) => it.toolCall && it.toolCall.toolIndex === action.payload.toolIndex
+      );
+      if (item) {
+        item.toolResult = {
+          success: action.payload.success,
+          output: action.payload.output,
+          error: action.payload.error,
+        };
+      }
+    },
+
+    /** 通过工具名称匹配更新工具调用记录的结果（用于 tool_result 没有 toolIndex 的情况） */
+    updateToolCallResultByToolName: (
+      state,
+      action: PayloadAction<{ tool: string; success: boolean; output?: unknown; error?: string }>
+    ) => {
+      const item = state.chatItems.find(
+        (it) => it.toolCall && it.toolCall.tool === action.payload.tool && !it.toolResult
+      );
+      if (item) {
+        item.toolResult = {
+          success: action.payload.success,
+          output: action.payload.output,
+          error: action.payload.error,
+        };
       }
     },
 
@@ -322,7 +332,8 @@ export const {
   appendReasoningContent,
   removeLastReasoningMessage,
   addToolCallItem,
-  updateLastToolCallResult,
+  updateToolCallResultByIndex,
+  updateToolCallResultByToolName,
   addAssistantMessage,
   updateAssistantMessageContent,
   appendAssistantContent,

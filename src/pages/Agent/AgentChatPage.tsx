@@ -35,7 +35,8 @@ import {
   addReasoningMessage,
   appendReasoningContent,
   addToolCallItem,
-  updateLastToolCallResult,
+  updateToolCallResultByIndex,
+  updateToolCallResultByToolName,
   addAssistantMessage,
   updateAssistantMessageContent,
   appendAssistantContent,
@@ -125,6 +126,10 @@ export const AgentChatPage: React.FC = () => {
   // 追踪当前是否已创建 thinking/reasoning 消息，避免竞态导致的重复窗口
   const hasThinkingMessage = useRef<boolean>(false);
   const hasReasoningMessage = useRef<boolean>(false);
+  // 追踪已处理的 (toolName, toolIndex) 对，避免同工具多调用产生重复气泡
+  const processedToolCalls = useRef<Set<string>>(new Set());
+  // 追踪上一次 tool_call 的 (toolName, toolIndex)，用于判断是流式参数还是新调用
+  const lastToolCallKey = useRef<{ tool: string; idx: number } | null>(null);
 
   // Load project list on mount (通过模块级标志位防止 StrictMode 和 Redux 状态变化导致重复请求)
   useEffect(() => {
@@ -206,6 +211,8 @@ export const AgentChatPage: React.FC = () => {
       currentReasoningMsgId.current = null;
       hasThinkingMessage.current = false;
       hasReasoningMessage.current = false;
+      processedToolCalls.current.clear();
+      lastToolCallKey.current = null;
 
       const controller = new AbortController();
       setAbortController(controller);
@@ -441,11 +448,23 @@ export const AgentChatPage: React.FC = () => {
         break;
       case 'tool_call':
         if (typeof rawData === 'object' && rawData !== null) {
-          const d = rawData as { tool?: string; input?: Record<string, unknown> };
-          // Keep thinking/reasoning visible; just record tool call
+          const d = rawData as { toolIndex?: number; tool?: string; input?: Record<string, unknown> };
+          const tool = d.tool || '';
+          const idx = d.toolIndex ?? 0;
+          const last = lastToolCallKey.current;
+
+          // 同工具 idx 递增：流式参数回调，跳过（不创建新气泡）
+          if (last && last.tool === tool && idx > last.idx) {
+            lastToolCallKey.current = { tool, idx };
+            break;
+          }
+
+          // 新工具调用（或 idx 变小 / 工具名变化）：创建气泡
+          lastToolCallKey.current = { tool, idx };
           dispatch(
             addToolCallItem({
-              tool: d.tool || '',
+              toolIndex: idx,
+              tool,
               input: d.input || {},
               isExecuting: true,
             })
@@ -454,15 +473,17 @@ export const AgentChatPage: React.FC = () => {
         break;
       case 'tool_result':
         if (typeof rawData === 'object' && rawData !== null) {
-          const d = rawData as { success?: boolean; output?: unknown; error?: string };
-          dispatch(
-            updateLastToolCallResult({
-              success: d.success ?? false,
-              output: d.output,
-              error: d.error,
-              isExecuting: false,
-            })
-          );
+          const d = rawData as { tool?: string; success?: boolean; output?: unknown; error?: string };
+          if (d.tool) {
+            dispatch(
+              updateToolCallResultByToolName({
+                tool: d.tool,
+                success: d.success ?? false,
+                output: d.output,
+                error: d.error,
+              })
+            );
+          }
           // 工具执行完成后，清空回复和推理的状态标记
           // 这样下一轮 reasoning/message 到来时会创建全新的气泡
           currentStreamingMsgId.current = null;

@@ -421,12 +421,12 @@ export interface AgentReasoningEvent {
 
 export interface AgentToolCallEvent {
   type: 'tool_call';
-  data: { tool: string; input: Record<string, unknown> };
+  data: { toolIndex: number; tool: string; input: Record<string, unknown> };
 }
 
 export interface AgentToolResultEvent {
   type: 'tool_result';
-  data: { tool: string; success: boolean; output?: unknown; error?: string };
+  data: { toolIndex: number; tool: string; success: boolean; output?: unknown; error?: string };
 }
 
 export interface AgentMessageEvent {
@@ -488,7 +488,7 @@ export interface AgentChatItem {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
-  toolCall?: { tool: string; input: Record<string, unknown> };
+  toolCall?: { toolIndex: number; tool: string; input: Record<string, unknown> };
   toolResult?: { success: boolean; output?: unknown; error?: string; isExecuting?: boolean };
   isThinking?: boolean;
   isReasoning?: boolean;
