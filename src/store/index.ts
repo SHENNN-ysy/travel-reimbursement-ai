@@ -6,6 +6,7 @@ import reimbursementReducer from './slices/reimbursementSlice';
 import projectReducer from './slices/projectSlice';
 import settingsReducer from './slices/settingsSlice';
 import agentReducer from './slices/agentSlice';
+import authReducer from './slices/authSlice';
 
 export const store = configureStore({
   reducer: {
@@ -16,6 +17,7 @@ export const store = configureStore({
     project: projectReducer,
     settings: settingsReducer,
     agent: agentReducer,
+    auth: authReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

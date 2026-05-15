@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layout, Menu } from 'antd';
+import { Layout, Menu, Button, Dropdown, Avatar, Space, Typography } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   UploadOutlined,
@@ -7,14 +7,21 @@ import {
   HomeOutlined,
   SettingOutlined,
   RobotOutlined,
+  LogoutOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
+import { useAppSelector, useAppDispatch } from '@/store/hooks';
+import { logout } from '@/store/slices/authSlice';
 import './MainLayout.css';
 
 const { Header, Sider, Content } = Layout;
+const { Text } = Typography;
 
 export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const dispatch = useAppDispatch();
+  const { user } = useAppSelector((state) => state.auth);
 
   const menuItems = [
     {
@@ -83,6 +90,43 @@ export const MainLayout: React.FC = () => {
         <Header className="layout-header">
           <div className="header-left">
             <h1 className="page-title">{getPageTitle()}</h1>
+          </div>
+          <div className="header-right">
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'username',
+                    label: (
+                      <Space>
+                        <UserOutlined />
+                        <span>{user?.nickname || user?.username}</span>
+                      </Space>
+                    ),
+                    disabled: true,
+                  },
+                  { type: 'divider' },
+                  {
+                    key: 'logout',
+                    label: '退出登录',
+                    icon: <LogoutOutlined />,
+                    danger: true,
+                    onClick: () => {
+                      dispatch(logout());
+                      navigate('/login');
+                    },
+                  },
+                ],
+              }}
+              placement="bottomRight"
+            >
+              <Button type="text" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Avatar size="small" style={{ backgroundColor: '#3B82F6' }}>
+                  {(user?.nickname || user?.username || 'U').charAt(0).toUpperCase()}
+                </Avatar>
+                <Text style={{ color: '#fff' }}>{user?.nickname || user?.username}</Text>
+              </Button>
+            </Dropdown>
           </div>
         </Header>
         <Content className="layout-content">

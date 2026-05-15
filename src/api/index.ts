@@ -6,6 +6,19 @@
 
 const BASE_URL = 'http://localhost:8080/api/v1';
 
+// ==================== 认证 Token ====================
+
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 // ==================== 通用工具 ====================
 
 async function request<T>(
@@ -13,17 +26,20 @@ async function request<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const url = `${BASE_URL}${path}`;
-  const defaultHeaders: HeadersInit = {
-    'Content-Type': 'application/json',
-  };
 
   const response = await fetch(url, {
     ...options,
     headers: {
-      ...defaultHeaders,
+      ...getAuthHeaders(),
       ...options.headers,
     },
   });
+
+  if (response.status === 401) {
+    localStorage.removeItem('token');
+    window.location.href = '/login';
+    throw new Error('登录已过期，请重新登录');
+  }
 
   const result = await response.json();
 
@@ -235,19 +251,29 @@ export async function uploadFile(
 ): Promise<FileVO> {
   const formData = new FormData();
   formData.append('file', file);
-  // type 只通过 URL 参数传递，避免重复
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   if (folderId !== undefined) {
     const sp = new URLSearchParams();
     sp.set('type', type);
     sp.set('folderId', String(folderId));
-    return fetch(`${BASE_URL}/projects/${projectId}/files/upload?${sp.toString()}`, { method: 'POST', body: formData })
+    return fetch(`${BASE_URL}/projects/${projectId}/files/upload?${sp.toString()}`, {
+      method: 'POST',
+      body: formData,
+      headers,
+    })
       .then(r => r.json())
       .then(res => {
         if (res.code !== 200) throw new Error(res.message);
         return res.data as FileVO;
       });
   } else {
-    return fetch(`${BASE_URL}/projects/${projectId}/files/upload?type=${type}`, { method: 'POST', body: formData })
+    return fetch(`${BASE_URL}/projects/${projectId}/files/upload?type=${type}`, {
+      method: 'POST',
+      body: formData,
+      headers,
+    })
       .then(r => r.json())
       .then(res => {
         if (res.code !== 200) throw new Error(res.message);
@@ -410,8 +436,11 @@ export async function downloadFile(
   projectId: number,
   fileId: number
 ): Promise<Blob> {
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   const url = `${BASE_URL}/projects/${projectId}/files/${fileId}/download`;
-  const response = await fetch(url);
+  const response = await fetch(url, { headers });
   if (!response.ok) throw new Error('文件下载失败');
   return response.blob();
 }
@@ -564,8 +593,11 @@ export function getReportItems(projectId: number, receiptType?: string): Promise
  * GET /projects/{projectId}/reports/export
  */
 export async function exportReportExcel(projectId: number, fileName: string) {
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   const url = `${BASE_URL}/projects/${projectId}/reports/export`;
-  const response = await fetch(url);
+  const response = await fetch(url, { headers });
   if (!response.ok) throw new Error('导出失败');
 
   const blob = await response.blob();
@@ -584,8 +616,11 @@ export async function exportReportExcel(projectId: number, fileName: string) {
  * GET /projects/{projectId}/export-package
  */
 export async function exportProjectPackage(projectId: number, fileName: string) {
+  const token = localStorage.getItem('token');
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   const url = `${BASE_URL}/projects/${projectId}/export-package`;
-  const response = await fetch(url);
+  const response = await fetch(url, { headers });
   if (!response.ok) throw new Error('导出失败');
 
   const blob = await response.blob();

@@ -11,8 +11,19 @@ import {
   ReportPage,
   SettingsPage,
   AgentChatPage,
+  LoginPage,
+  RegisterPage,
 } from '@/pages';
 import { ErrorBoundary } from '@/components/common';
+import { useAppSelector } from '@/store/hooks';
+
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAuthenticated } = useAppSelector((state) => state.auth);
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
+};
 
 const App: React.FC = () => {
   return (
@@ -33,7 +44,16 @@ const App: React.FC = () => {
       >
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<MainLayout />}>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <MainLayout />
+                </ProtectedRoute>
+              }
+            >
               <Route index element={<HomePage />} />
               <Route path="archive" element={<ArchivePage />} />
               <Route path="report" element={
