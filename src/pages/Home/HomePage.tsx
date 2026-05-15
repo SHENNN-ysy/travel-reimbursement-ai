@@ -14,6 +14,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { formatCurrency } from '@/utils/format';
 import { TravelInfoForm } from '@/components/forms';
+import { HelpModal } from '@/components/common/HelpModal';
 import {
   fetchProjects,
   createProject,
@@ -329,8 +330,13 @@ export const HomePage: React.FC = () => {
   return (
     <div className="home-page">
       <div className="welcome-section">
-        <h2 className="welcome-title">欢迎使用出差报销AI助手 👋</h2>
-        <p className="welcome-subtitle">智能识别发票，一键生成报销报表，让报销更简单</p>
+        <div className="welcome-left">
+          <h2 className="welcome-title">欢迎使用出差报销AI助手 👋</h2>
+          <p className="welcome-subtitle">智能识别发票，一键生成报销报表，让报销更简单</p>
+        </div>
+        <div className="welcome-right">
+          <HelpModal />
+        </div>
       </div>
 
       <Row gutter={[16, 16]} className="stats-row">

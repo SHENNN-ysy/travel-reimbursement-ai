@@ -44,7 +44,7 @@ import {
 } from '@/store/slices/fileSlice';
 import { fetchReportItems } from '@/store/slices/reportSlice';
 import { fetchProjects, fetchProjectDetail, clearCurrentProject } from '@/store/slices/projectSlice';
-import { PageHeader } from '@/components/common';
+import { PageHeader, ArchiveUploadGuide } from '@/components/common';
 import { UploadFile, InvoiceRecognitionData, ScreenshotRecognitionData } from '@/types';
 import { useBatchRecognize, FileRecognitionResult } from '@/hooks/useBatchRecognize';
 import { formatFileSize } from '@/utils/format';
@@ -1379,7 +1379,11 @@ export const ArchivePage: React.FC = () => {
         {/* 右侧：资料汇总 */}
         <div className="archive-main">
           {/* 资料上传区 */}
-          <Card title="📤 资料上传" className="upload-card">
+          <Card
+            title="📤 资料上传"
+            className="upload-card"
+            extra={<ArchiveUploadGuide />}
+          >
             <div className="upload-areas-split">
               <UploadArea
                 type="invoice"

@@ -6,7 +6,14 @@
 }
 
 .welcome-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 32px;
+}
+
+.welcome-left {
+  flex: 1;
 }
 
 .welcome-title {

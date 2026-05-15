@@ -355,6 +355,17 @@
   font-size: 16px;
 }
 
+.upload-card .ant-card-head {
+  padding: 12px 20px;
+  min-height: unset;
+}
+
+.upload-card .ant-card-extra {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* 资料汇总卡片 */
 .summary-card .card-title {
   width: 100%;
