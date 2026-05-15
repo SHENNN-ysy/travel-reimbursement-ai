@@ -233,11 +233,15 @@ export const AgentChatPage: React.FC = () => {
       const pendingData = { current: '' };
 
       try {
+        const token = localStorage.getItem('token');
         const response = await fetch(
           `http://localhost:8080/api/v1/projects/${projectId}/agent/chat?sessionId=${encodeURIComponent(sessionId)}`,
           {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            },
             body: new URLSearchParams({ message: content }),
             signal: controller.signal,
           }

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Card, Form, Input, Switch, Button, Divider, Space, message } from 'antd';
+import { Card, Form, Input, Button, Divider, Space, message } from 'antd';
 import { PageHeader } from '@/components/common';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { fetchSettings, saveSettings } from '@/store/slices/settingsSlice';
@@ -77,33 +77,6 @@ export const SettingsPage: React.FC = () => {
               rules={[{ required: true, message: '请输入应用名称' }]}
             >
               <Input placeholder="请输入应用名称" />
-            </Form.Item>
-
-            <Form.Item
-              name="autoRecognize"
-              label="自动识别"
-              valuePropName="checked"
-            >
-              <Switch />
-              <span className="switch-hint">上传文件后自动进行AI识别</span>
-            </Form.Item>
-
-            <Form.Item
-              name="autoArchive"
-              label="自动归档"
-              valuePropName="checked"
-            >
-              <Switch />
-              <span className="switch-hint">识别完成后自动归档文件</span>
-            </Form.Item>
-
-            <Form.Item
-              name="notifications"
-              label="消息通知"
-              valuePropName="checked"
-            >
-              <Switch />
-              <span className="switch-hint">接收处理状态变更通知</span>
             </Form.Item>
 
             <Form.Item>
