@@ -43,9 +43,11 @@ import {
   clearChatItems,
   setChatLoading,
   createAgentSession,
+  setMessageComplete,
 } from '@/store/slices/agentSlice';
 import { fetchProjectDetail, fetchProjects } from '@/store/slices/projectSlice';
 import type { AgentChatItem } from '@/types';
+import { MessageRenderer, isMarkdownContent } from '@/components/common/MessageRenderer';
 import dayjs from 'dayjs';
 import './AgentChatPage.css';
 
@@ -588,6 +590,12 @@ export const AgentChatPage: React.FC = () => {
         break;
       case 'done':
         // 停止所有打字动画，并将最终完整内容写入 Redux
+        // 同时标记所有流式 assistant 消息为已完成，触发 markdown 富文本渲染
+        typingStateMap.current.forEach((_, msgId) => {
+          if (msgId.startsWith('assistant-')) {
+            dispatch(setMessageComplete(msgId));
+          }
+        });
         typingStateMap.current.forEach((state) => {
           if (state.intervalId) clearInterval(state.intervalId);
           if (state.fullText) {
@@ -661,11 +669,21 @@ export const AgentChatPage: React.FC = () => {
               >
                 {item.toolResult.success ? '执行成功' : '执行失败'}
                 {item.toolResult.output !== undefined && (
-                  <pre className="tool-result-output">
-                    {typeof item.toolResult.output === 'string'
+                  (() => {
+                    const rawOutput = typeof item.toolResult.output === 'string'
                       ? item.toolResult.output
-                      : JSON.stringify(item.toolResult.output, null, 2)}
-                  </pre>
+                      : JSON.stringify(item.toolResult.output, null, 2);
+                    const isMd = isMarkdownContent(rawOutput);
+                    return (
+                      <pre className={`tool-result-output ${isMd ? 'tool-result-md' : ''}`}>
+                        {isMd ? (
+                          <MessageRenderer content={rawOutput} />
+                        ) : (
+                          rawOutput
+                        )}
+                      </pre>
+                    );
+                  })()
                 )}
                 {item.toolResult.error && (
                   <span className="tool-result-error-msg">{item.toolResult.error}</span>
@@ -718,7 +736,7 @@ export const AgentChatPage: React.FC = () => {
           <RobotOutlined />
         </div>
         <div className="chat-bubble chat-bubble-assistant">
-          <span className="message-text">{displayedContent}</span>
+          <MessageRenderer content={displayedContent} className="message-text" />
         </div>
       </div>
     );

@@ -97,6 +97,14 @@ const agentSlice = createSlice({
       state.chatItems = [];
     },
 
+    /** 标记指定消息为已完成（触发 markdown 富文本渲染） */
+    setMessageComplete: (state, action: PayloadAction<string>) => {
+      const item = state.chatItems.find((it) => it.id === action.payload);
+      if (item) {
+        item.isComplete = true;
+      }
+    },
+
     /** 添加用户消息到列表 */
     addUserMessage: (state, action: PayloadAction<{ content: string }>) => {
       state.chatItems.push({
@@ -293,6 +301,8 @@ const agentSlice = createSlice({
           role: msg.role as 'user' | 'assistant',
           content: msg.content,
           timestamp: msg.timestamp,
+          // 历史消息均为已完成状态，可直接走 markdown 富文本渲染
+          isComplete: msg.role === 'assistant',
         }));
       // 只有当历史消息与当前消息不重复时才追加
       const existingIds = new Set(state.chatItems.map((item) => item.id));
@@ -325,6 +335,7 @@ export const {
   setProjectId,
   setCurrentSessionId,
   clearChatItems,
+  setMessageComplete,
   addUserMessage,
   addThinkingMessage,
   updateLastThinkingMessage,

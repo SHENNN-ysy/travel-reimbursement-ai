@@ -493,4 +493,6 @@ export interface AgentChatItem {
   isThinking?: boolean;
   isReasoning?: boolean;
   timestamp?: string;
+  /** 消息内容是否已渲染完成（用于判断是否走 markdown 富文本渲染） */
+  isComplete?: boolean;
 }
