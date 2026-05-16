@@ -64,7 +64,54 @@ const TOOL_LABELS: Record<string, string> = {
   create_report_item: '创建报表明细',
   auto_fill_report: '智能填充报表',
   export_excel: '导出 Excel',
+  export_package: '导出报销项目',
 };
+
+// 下载链接正则（export-package 和 reports/export）
+const DOWNLOAD_URL_RE = /(https?:\/\/[^\s'")，]+(?:\/export-package|\/reports\/export)[^\s'")]*)/g;
+
+/**
+ * 用 Authorization 头下载文件（避免 token 出现在 URL 中）
+ */
+async function downloadWithAuth(url: string, filenameHint?: string) {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    message.error('未登录，无法下载文件');
+    return;
+  }
+  try {
+    const res = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`下载失败 (${res.status}): ${errText}`);
+    }
+    const blob = await res.blob();
+    // 优先从 Content-Disposition 取文件名，否则用 hint
+    let filename = filenameHint ?? 'download';
+    const cd = res.headers.get('Content-Disposition');
+    if (cd) {
+      const m = cd.match(/filename[^;=\n]*=(?:(\\?['"])(.*?)\1|([^;\n]*))/i);
+      if (m && (m[2] || m[3])) {
+        filename = m[2] || m[3];
+        filename = decodeURIComponent(filename);
+      }
+    } else if (filenameHint) {
+      filename = decodeURIComponent(filenameHint);
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+    message.success('文件下载成功');
+  } catch (err: any) {
+    message.error(err.message ?? '下载失败');
+  }
+}
 
 // 快捷指令
 const QUICK_ACTIONS = [
@@ -545,6 +592,15 @@ export const AgentChatPage: React.FC = () => {
           if (state.intervalId) clearInterval(state.intervalId);
           if (state.fullText) {
             dispatch(updateAssistantMessageContent(state.fullText));
+            // 拦截下载链接，自动触发带 Authorization 头的下载
+            const matches = state.fullText.match(DOWNLOAD_URL_RE);
+            if (matches) {
+              matches.forEach((url) => {
+                // 从 URL 末尾提取文件名作为 hint
+                const filenameHint = decodeURIComponent(url.split('/').pop()?.split('?')[0] ?? 'download');
+                downloadWithAuth(url, filenameHint);
+              });
+            }
           }
         });
         typingStateMap.current.clear();
