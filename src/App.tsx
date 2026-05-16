@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Provider } from 'react-redux';
+import { Provider, useDispatch, useSelector } from 'react-redux';
 import { ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { store } from '@/store';
+import type { RootState } from '@/store';
+import { fetchCurrentUser } from '@/store/slices/authSlice';
 import {
   MainLayout,
   HomePage,
@@ -15,10 +17,22 @@ import {
   RegisterPage,
 } from '@/pages';
 import { ErrorBoundary } from '@/components/common';
-import { useAppSelector } from '@/store/hooks';
+
+const AuthBootstrap: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const dispatch = useDispatch();
+  const { isAuthenticated, user } = useSelector((state: RootState) => state.auth);
+
+  useEffect(() => {
+    if (isAuthenticated && !user) {
+      dispatch(fetchCurrentUser());
+    }
+  }, [isAuthenticated, user, dispatch]);
+
+  return <>{children}</>;
+};
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated } = useAppSelector((state) => state.auth);
+  const { isAuthenticated } = useSelector((state: RootState) => state.auth);
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
@@ -43,6 +57,7 @@ const App: React.FC = () => {
         }}
       >
         <BrowserRouter>
+          <AuthBootstrap>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
@@ -66,6 +81,7 @@ const App: React.FC = () => {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>
+          </AuthBootstrap>
         </BrowserRouter>
       </ConfigProvider>
     </Provider>

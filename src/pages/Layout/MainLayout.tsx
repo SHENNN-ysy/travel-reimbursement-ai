@@ -12,6 +12,13 @@ import {
 } from '@ant-design/icons';
 import { useAppSelector, useAppDispatch } from '@/store/hooks';
 import { logout } from '@/store/slices/authSlice';
+import { resetProjectSlice } from '@/store/slices/projectSlice';
+import { resetFileSlice } from '@/store/slices/fileSlice';
+import { resetReimbursementSlice } from '@/store/slices/reimbursementSlice';
+import { resetReportSlice } from '@/store/slices/reportSlice';
+import { resetUploadSlice } from '@/store/slices/uploadSlice';
+import { resetSettingsSlice } from '@/store/slices/settingsSlice';
+import { resetAgentState } from '@/store/slices/agentSlice';
 import './MainLayout.css';
 
 const { Header, Sider, Content } = Layout;
@@ -112,6 +119,13 @@ export const MainLayout: React.FC = () => {
                     icon: <LogoutOutlined />,
                     danger: true,
                     onClick: () => {
+                      dispatch(resetProjectSlice());
+                      dispatch(resetFileSlice());
+                      dispatch(resetReimbursementSlice());
+                      dispatch(resetReportSlice());
+                      dispatch(resetUploadSlice());
+                      dispatch(resetSettingsSlice());
+                      dispatch(resetAgentState());
                       dispatch(logout());
                       navigate('/login');
                     },

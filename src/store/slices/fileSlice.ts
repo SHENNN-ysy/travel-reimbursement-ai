@@ -262,6 +262,7 @@ const fileSlice = createSlice({
     clearError: (state) => {
       state.error = null;
     },
+    resetFileSlice: () => initialState,
   },
   extraReducers: (builder) => {
     // fetchFileList
@@ -439,6 +440,7 @@ export const {
   clearBatchRecognizeTask,
   setBatchRecognizeTask,
   clearError,
+  resetFileSlice,
 } = fileSlice.actions;
 
 export default fileSlice.reducer;

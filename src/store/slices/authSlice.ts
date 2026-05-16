@@ -40,17 +40,15 @@ export const fetchCurrentUser = createAsyncThunk('auth/fetchCurrentUser', async 
   return await authApi.getMe();
 });
 
+export const logout = createAsyncThunk('auth/logout', async () => {
+  localStorage.removeItem('token');
+  return { user: null, token: null, isAuthenticated: false };
+});
+
 const authSlice = createSlice({
   name: 'auth',
   initialState,
-  reducers: {
-    logout(state) {
-      state.user = null;
-      state.token = null;
-      state.isAuthenticated = false;
-      localStorage.removeItem('token');
-    },
-  },
+  reducers: {},
   extraReducers: (builder) => {
     builder.addCase(login.pending, (state) => {
       state.loading = true;
@@ -85,8 +83,12 @@ const authSlice = createSlice({
         nickname: action.payload.nickname,
       };
     });
+    builder.addCase(logout.fulfilled, (state) => {
+      state.user = null;
+      state.token = null;
+      state.isAuthenticated = false;
+    });
   },
 });
 
-export const { logout } = authSlice.actions;
 export default authSlice.reducer;

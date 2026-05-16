@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import * as api from '@/api';
 import type { ProjectVO, ProjectDetailVO, CreateProjectDTO, UpdateProjectDTO } from '@/api';
+import { projectsFetched } from '@/utils/constants';
 
 interface ProjectState {
   // 项目列表
@@ -115,6 +116,10 @@ const projectSlice = createSlice({
       state.projects = [];
       state.projectsTotal = 0;
     },
+    resetProjectSlice: (state) => {
+      projectsFetched.value = false;
+      return initialState;
+    },
     updateProjectLocally: (state, action: PayloadAction<ProjectVO>) => {
       const index = state.projects.findIndex(p => p.id === action.payload.id);
       if (index !== -1) {
@@ -201,5 +206,5 @@ const projectSlice = createSlice({
   },
 });
 
-export const { clearCurrentProject, clearProjects, updateProjectLocally } = projectSlice.actions;
+export const { clearCurrentProject, clearProjects, updateProjectLocally, resetProjectSlice } = projectSlice.actions;
 export default projectSlice.reducer;

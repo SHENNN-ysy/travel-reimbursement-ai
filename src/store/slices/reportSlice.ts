@@ -130,6 +130,7 @@ const reportSlice = createSlice({
       state.confirmedCount = 0;
       state.unconfirmedCount = 0;
     },
+    resetReportSlice: () => initialState,
   },
   extraReducers: (builder) => {
     // fetchReportItems
@@ -199,5 +200,5 @@ const reportSlice = createSlice({
   },
 });
 
-export const { setItems, setSummary, clearReport } = reportSlice.actions;
+export const { setItems, setSummary, clearReport, resetReportSlice } = reportSlice.actions;
 export default reportSlice.reducer;

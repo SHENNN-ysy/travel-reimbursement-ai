@@ -58,6 +58,10 @@ export const STATUS_COLORS = {
   failed: '#EF4444',    // 失败
 };
 
+// Session flag: controls whether the project list has been fetched for the current login session.
+// Resets when user logs out.
+export const projectsFetched = { value: false };
+
 // 状态文本映射
 export const STATUS_TEXT = {
   pending: '待处理',

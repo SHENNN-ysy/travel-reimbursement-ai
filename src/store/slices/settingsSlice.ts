@@ -34,7 +34,9 @@ export const saveSettings = createAsyncThunk(
 const settingsSlice = createSlice({
   name: 'settings',
   initialState,
-  reducers: {},
+  reducers: {
+    resetSettingsSlice: () => initialState,
+  },
   extraReducers: (builder) => {
     builder.addCase(fetchSettings.pending, (state) => {
       state.loading = true;
@@ -58,5 +60,7 @@ const settingsSlice = createSlice({
     });
   },
 });
+
+export const { resetSettingsSlice } = settingsSlice.actions;
 
 export default settingsSlice.reducer;

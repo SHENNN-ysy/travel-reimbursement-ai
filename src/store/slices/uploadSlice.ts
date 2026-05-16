@@ -89,6 +89,7 @@ const uploadSlice = createSlice({
         state[`${action.payload}s`] = [];
       }
     },
+    resetUploadSlice: () => initialState,
   },
 });
 
@@ -99,6 +100,7 @@ export const {
   setUploadProgress,
   setUploading,
   clearFiles,
+  resetUploadSlice,
 } = uploadSlice.actions;
 
 export default uploadSlice.reducer;

@@ -23,14 +23,13 @@ import {
   fetchProjectDetail,
   exportProjectPackage,
 } from '@/store/slices/projectSlice';
+import { projectsFetched } from '@/utils/constants';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import type { ProjectVO } from '@/api';
 import dayjs from 'dayjs';
 import './HomePage.css';
 
 const { Text } = Typography;
-
-let projectsFetched = false;
 
 export const HomePage: React.FC = () => {
   const navigate = useNavigate();
@@ -53,10 +52,10 @@ export const HomePage: React.FC = () => {
   const [editFormVisible, setEditFormVisible] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectVO | null>(null);
 
-  // 初始化加载项目列表（通过模块级标志位防止 StrictMode 和 Redux 状态变化导致重复请求）
+  // 初始化加载项目列表（通过 projectsFetched 标志位防止 StrictMode 和 Redux 状态变化导致重复请求）
   useEffect(() => {
-    if (projectsFetched) return;
-    projectsFetched = true;
+    if (projectsFetched.value) return;
+    projectsFetched.value = true;
     dispatch(fetchProjects({ current: 1, size: 50 }));
   }, [dispatch]);
 

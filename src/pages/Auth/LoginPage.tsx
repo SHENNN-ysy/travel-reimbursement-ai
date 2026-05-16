@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import { Form, Input, Button, Card, message, Typography, Divider } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
-import { login } from '@/store/slices/authSlice';
+import { login, fetchCurrentUser } from '@/store/slices/authSlice';
 
 const { Title, Text } = Typography;
 
@@ -13,9 +13,14 @@ const LoginPage: React.FC = () => {
   const dispatch = useAppDispatch();
   const { loading } = useAppSelector((state) => state.auth);
 
+  useEffect(() => {
+    form.resetFields();
+  }, [form]);
+
   const handleSubmit = async (values: { username: string; password: string }) => {
     try {
       await dispatch(login(values)).unwrap();
+      await dispatch(fetchCurrentUser()).unwrap();
       message.success('登录成功');
       navigate('/');
     } catch (err: any) {

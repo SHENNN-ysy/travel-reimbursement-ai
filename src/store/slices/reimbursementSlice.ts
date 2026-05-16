@@ -304,6 +304,8 @@ const reimbursementSlice = createSlice({
       state.currentProject = null;
     },
 
+    resetReimbursementSlice: () => initialState,
+
     // 保存到历史
     saveToHistory: (state) => {
       if (state.currentProject) {
@@ -359,6 +361,7 @@ export const {
   updateFolderName,
   clearCurrentProject,
   saveToHistory,
+  resetReimbursementSlice,
 } = reimbursementSlice.actions;
 
 export default reimbursementSlice.reducer;
